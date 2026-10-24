@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>工创赛物流搬运 - 极简最短正交版</title>
+    <style>
+        :root { --bg: #0f172a; --panel: #1e293b; --text: #e2e8f0; --accent: #3b82f6; --danger: #ef4444; --success: #10b981; --border: #475569; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; align-items: center; padding: 10px; min-height: 100vh; user-select: none; }
+        .container { width: 100%; max-width: 650px; display: flex; flex-direction: column; gap: 10px; }
+        .header { text-align: center; font-size: 18px; font-weight: bold; color: var(--accent); letter-spacing: 1px; }
+        .canvas-wrapper { position: relative; width: 100%; aspect-ratio: 1/1; background: #2a3441; border-radius: 8px; overflow: hidden; border: 2px solid var(--border); cursor: crosshair; }
+        canvas { width: 100%; height: 100%; display: block; }
+        .status-panel { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+        .status-item { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .status-label { font-size: 11px; color: #94a3b8; margin-bottom: 2px; }
+        .status-value { font-size: 14px; font-weight: bold; color: var(--accent); font-family: monospace;}
+        .log { background: #0f172a; padding: 10px; border-radius: 6px; font-size: 12px; font-family: monospace; color: #94a3b8; height: 60px; overflow-y: auto; line-height: 1.5; border: 1px solid var(--border); }
+        .btn-group { display: flex; flex-direction: column; gap: 8px; }
+        button.action { width: 100%; padding: 12px; border: none; border-radius: 6px; background: var(--success); color: #fff; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
+        button.action:active { transform: scale(0.98); }
+        button.action.clear-btn { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); box-shadow: none;}
+        .panel { background: var(--panel); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--border); }
+        .panel-title { font-size: 13px; font-weight: bold; color: #cbd5e1; margin-bottom: 4px; border-left: 3px solid var(--accent); padding-left: 8px;}
+        .mission-config { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+        select { width: 100%; padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: #0f172a; color: #fff; font-family: monospace; font-size: 12px; outline: none; }
+        .param-group { display: flex; flex-direction: column; gap: 6px; }
+        .control-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: #0f172a; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); }
+        .control-label { font-size: 12px; color: #cbd5e1; width: 110px; white-space: nowrap;}
+        .control-inputs { display: flex; align-items: center; gap: 10px; flex: 1; }
+        .control-inputs input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px;}
+        .control-inputs input[type="number"] { width: 60px; padding: 4px; text-align: right; border-radius: 4px; border: 1px solid var(--border); background: #1e293b; color: #fff; font-family: monospace; font-size: 12px;}
+        .unit { font-size: 11px; color: #64748b; width: 20px; text-align: right;}
+        .zone-btn { flex: 1; padding: 8px; border: 1px solid var(--border); background: #334155; color: #94a3b8; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; font-size: 13px; }
+        .zone-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">⚡ 极简大直角 · 动态矩形避障</div>
+    <div class="canvas-wrapper"><canvas id="map" width="600" height="600"></canvas></div>
+    <div class="status-panel">
+        <div class="status-item"><span class="status-label">坐标 (X, Y)</span><span class="status-value" id="ui-pos">0, 0</span></div>
+        <div class="status-item"><span class="status-label">车头朝向</span><span class="status-value" id="ui-angle">0°</span></div>
+        <div class="status-item"><span class="status-label">当前状态</span><span class="status-value" id="ui-state" style="color:#10b981;">待命</span></div>
+    </div>
+    <div class="log" id="log">> 物理级防斜：彻底禁绝对角线，且强行合并冗余拐点。</div>
+    <div class="btn-group">
+        <button class="action" onclick="runMission()">▶ 开始执行任务</button>
+        <button class="action clear-btn" onclick="clearObstacles()">清除所有打点障碍物</button>
+    </div>
+    <div class="panel">
+        <div class="panel-title">任务步骤配置 (最多12步)</div>
+        <div class="mission-config" id="missionConfig"></div>
+    </div>
+    <div class="panel">
+        <div class="panel-title">仿真参数调节</div>
+        <div class="row" style="display:flex; gap:8px; margin-bottom: 4px;">
+            <button class="zone-btn active" id="btnZ1" onclick="setZone(1)">启停区 1 (右上)</button>
+            <button class="zone-btn" id="btnZ2" onclick="setZone(2)">启停区 2 (右下)</button>
+        </div>
+        <div class="param-group">
+            <div class="control-row"><span class="control-label">车身长 (L):</span><div class="control-inputs"><input type="number" id="carLNum" min="100" max="500" step="10" value="300"><span class="unit">mm</span></div></div>
+            <div class="control-row"><span class="control-label">车身宽 (W):</span><div class="control-inputs"><input type="number" id="carWNum" min="100" max="500" step="10" value="300"><span class="unit">mm</span></div></div>
+            <div class="control-row"><span class="control-label">移动速度:</span><div class="control-inputs"><input type="range" id="moveSpeedSlider" min="1" max="10" step="0.5" value="4"><input type="number" id="moveSpeedNum" min="1" max="10" step="0.5" value="4"></div></div>
+            <div class="control-row"><span class="control-label">旋转速度:</span><div class="control-inputs"><input type="range" id="rotSpeedSlider" min="0.01" max="0.1" step="0.01" value="0.05"><input type="number" id="rotSpeedNum" min="0.01" max="0.1" step="0.01" value="0.05"></div></div>
+            <div class="control-row"><span class="control-label">抓取时间:</span><div class="control-inputs"><input type="range" id="grabTimeSlider" min="0.5" max="5" step="0.1" value="1.5"><input type="number" id="grabTimeNum" min="0.5" max="5" step="0.1" value="1.5"><span class="unit">s</span></div></div>
+            <div class="control-row"><span class="control-label">原料区距顶:</span><div class="control-inputs"><input type="range" id="rawGapSlider" min="75" max="85" step="1" value="80"><input type="number" id="rawGapNum" min="75" max="85" step="1" value="80"><span class="unit">mm</span></div></div>
+            <div class="control-row"><span class="control-label">暂存区中心Y:</span><div class="control-inputs"><input type="range" id="tempYSlider" min="1100" max="1300" step="1" value="1200"><input type="number" id="tempYNum" min="1100" max="1300" step="1" value="1200"><span class="unit">mm</span></div></div>
+            <div class="control-row"><span class="control-label">障碍物半径:</span><div class="control-inputs"><input type="range" id="obsRadSlider" min="0" max="150" step="1" value="40"><input type="number" id="obsRadNum" min="0" max="150" step="1" value="40"><span class="unit">mm</span></div></div>
+            <div class="control-row"><span class="control-label">避障外围半径:</span><div class="control-inputs"><input type="range" id="safeRadSlider" min="0" max="250" step="1" value="80"><input type="number" id="safeRadNum" min="0" max="250" step="1" value="80"><span class="unit">mm</span></div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('map');
+    const ctx = canvas.getContext('2d');
+    const logEl = document.getElementById('log');
+    const uiPos = document.getElementById('ui-pos'), uiAngle = document.getElementById('ui-angle'), uiState = document.getElementById('ui-state');
+
+    const MAP_SIZE = 2400, PADDING = 30, DRAW_SIZE = 600, DRAW_AREA = DRAW_SIZE - PADDING * 2;
+    const MM2PX = DRAW_AREA / MAP_SIZE;
+    const PX = (mm) => mm * MM2PX;
+    const mapX = (x) => PADDING + x * MM2PX;
+    const mapY = (y) => PADDING + y * MM2PX;
+
+    let carL = 300, carW = 300, moveSpeed = 4.0, rotSpeed = 0.05, grabTime = 1.5;
+    let obsRadMM = 40, safeRadMM = 80, rawMatGap = 80, tempZoneCenterY = 1200;
+
+    const ZONE1 = { x: 2100, y: 0, w: 300, h: 300 };
+    const ZONE2 = { x: 2100, y: 2100, w: 300, h: 300 };
+
+    let currentZone = 1, dynamicObs = [], robotPos = { x: 0, y: 0 }, robotAngle = 0, pathPoints = [];
+    let animTimer = null, isMissionPlanned = false, actionQueue = [], currentAction = null, actionProgress = 0;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = 600 * dpr; canvas.height = 600 * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    function getStaticObs() {
+        return [
+            { x: 550, y: 550, w: 450, h: 450, color: '#3b82f6' },
+            { x: 1400, y: 550, w: 450, h: 450, color: '#3b82f6' },
+            { x: 550, y: 1400, w: 450, h: 450, color: '#3b82f6' },
+            { x: 1400, y: 1400, w: 450, h: 450, color: '#3b82f6' },
+            { x: 0, y: tempZoneCenterY - 290, w: 150, h: 580, color: '#10b981' },
+            { x: 910, y: 2250, w: 580, h: 150, color: '#f59e0b' }
+        ];
+    }
+
+    function getTaskCoords() {
+        let rawR = 150, rawMatYCenter = -(rawR - rawMatGap), rawTaskY = rawMatGap + carW / 2 + 20;
+        return {
+            "QR":  { x: 2200, y: 1200, name: "扫码区", angle: 0, actionType: 'scan' },
+            "156": { x: 1200, y: rawTaskY, name: "原料区", angle: -Math.PI/2, actionType: 'grab' },
+            "123": { x: 305, y: tempZoneCenterY, name: "暂存区", angle: Math.PI, actionType: 'grab' },
+            "516": { x: 1200, y: 2095, name: "粗加工区", angle: Math.PI/2, actionType: 'grab' },
+            "231": { x: 1800, y: 1800, name: "右下加工区", angle: Math.PI/2, actionType: 'grab' }
+        };
+    }
+
+    function initMissionUI() {
+        const container = document.getElementById('missionConfig');
+        let html = "";
+        const coords = getTaskCoords();
+        const options = Object.keys(coords).filter(k => k !== "QR");
+        for (let i = 0; i < 12; i++) {
+            html += `<select id="step${i}">`;
+            if (i === 0) html += `<option value="QR">步骤1: 扫码区</option>`;
+            else {
+                html += `<option value="none">步骤${i+1}: 无</option>`;
+                options.forEach(opt => { html += `<option value="${opt}">步骤${i+1}: ${coords[opt].name}</option>`; });
+            }
+            html += `</select>`;
+        }
+        container.innerHTML = html;
+    }
+
+    function log(msg) { logEl.innerHTML = "> " + msg + "<br>" + logEl.innerHTML; }
+    function getStartPt() { const z = currentZone === 1 ? ZONE1 : ZONE2; return { x: z.x + z.w/2, y: z.y + z.h/2 }; }
+
+    function getCarAABB(angle) {
+        let isHorizontal = Math.abs(Math.cos(angle)) > 0.5;
+        return {
+            halfX: isHorizontal ? carL / 2 : carW / 2,
+            halfY: isHorizontal ? carW / 2 : carL / 2
+        };
+    }
+
+    function isRectCircleColliding(cx, cy, ox, oy, r, angle) {
+        let { halfX, halfY } = getCarAABB(angle);
+        let closestX = Math.max(cx - halfX, Math.min(ox, cx + halfX));
+        let closestY = Math.max(cy - halfY, Math.min(oy, cy + halfY));
+        let dx = ox - closestX, dy = oy - closestY;
+        return (dx * dx + dy * dy) < (r * r);
+    }
+
+    function isRectRectColliding(cx, cy, rx, ry, rw, rh, angle) {
+        let { halfX, halfY } = getCarAABB(angle);
+        return (cx + halfX > rx && cx - halfX < rx + rw && cy + halfY > ry && cy - halfY < ry + rh);
+    }
+
+    // 画线时彻底防止斜线
+    function draw() {
+        ctx.clearRect(0, 0, 600, 600);
+        ctx.fillStyle = '#dcdcdc'; ctx.fillRect(PADDING, PADDING, DRAW_AREA, DRAW_AREA);
+
+        ctx.fillStyle = '#64748b'; ctx.font = '10px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        for(let mm = 0; mm <= MAP_SIZE; mm += 400) {
+            let cx = mapX(mm), cy = mapY(mm);
+            ctx.fillText(mm, cx, 5); ctx.beginPath(); ctx.moveTo(cx, PADDING); ctx.lineTo(cx, PADDING - 5); ctx.stroke();
+            ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(mm, PADDING - 5, cy);
+            ctx.beginPath(); ctx.moveTo(PADDING, cy); ctx.lineTo(PADDING - 5, cy); ctx.stroke();
+            if (mm === 1200) {
+                ctx.strokeStyle = '#cbd5e1'; ctx.setLineDash([5, 5]); ctx.beginPath();
+                ctx.moveTo(cx, PADDING); ctx.lineTo(cx, DRAW_SIZE - PADDING);
+                ctx.moveTo(PADDING, cy); ctx.lineTo(DRAW_SIZE - PADDING, cy);
+                ctx.stroke(); ctx.setLineDash([]);
+            }
+        }
+
+        ctx.fillStyle = '#fff'; 
+        getStaticObs().forEach(o => {
+            ctx.fillRect(mapX(o.x), mapY(o.y), PX(o.w), PX(o.h));
+            ctx.strokeStyle = o.color; ctx.lineWidth = 2; ctx.strokeRect(mapX(o.x), mapY(o.y), PX(o.w), PX(o.h));
+        });
+
+        let rawMatYCenter = -(150 - rawMatGap);
+        ctx.fillStyle = '#fff'; ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(mapX(1200), mapY(rawMatYCenter), PX(150), 0, Math.PI, false); ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = '#333'; ctx.font = `bold 12px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText("加工区", mapX(775), mapY(775)); ctx.fillText("加工区", mapX(1625), mapY(775));
+        ctx.fillText("加工区", mapX(775), mapY(1625)); ctx.fillText("加工区", mapX(1625), mapY(1625));
+        ctx.fillText("暂存区", mapX(75), mapY(tempZoneCenterY));
+        ctx.fillText("粗加工区", mapX(1200), mapY(2325));
+        ctx.fillText("原料区", mapX(1200), mapY(rawMatGap + 50));
+        ctx.fillText("二维码板", mapX(2250), mapY(1200));
+
+        ctx.fillStyle = '#0000ff'; ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2;
+        ctx.fillRect(mapX(ZONE1.x), mapY(ZONE1.y), PX(ZONE1.w), PX(ZONE1.h)); ctx.strokeRect(mapX(ZONE1.x), mapY(ZONE1.y), PX(ZONE1.w), PX(ZONE1.h));
+        ctx.fillRect(mapX(ZONE2.x), mapY(ZONE2.y), PX(ZONE2.w), PX(ZONE2.h)); ctx.strokeRect(mapX(ZONE2.x), mapY(ZONE2.y), PX(ZONE2.w), PX(ZONE2.h));
+
+        dynamicObs.forEach(o => {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; ctx.beginPath(); ctx.arc(mapX(o.x), mapY(o.y), PX(obsRadMM), 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.8)'; ctx.lineWidth = 1; ctx.stroke();
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.05)'; ctx.beginPath(); ctx.arc(mapX(o.x), mapY(o.y), PX(safeRadMM), 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)'; ctx.setLineDash([3, 3]); ctx.stroke(); ctx.setLineDash([]);
+        });
+
+        if (pathPoints.length > 0) {
+            ctx.strokeStyle = 'rgba(16, 185, 129, 0.3)'; ctx.lineWidth = PX(Math.min(carL, carW)); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.beginPath(); 
+            ctx.moveTo(Math.round(mapX(pathPoints[0].x)), Math.round(mapY(pathPoints[0].y)));
+            for (let i=1; i<pathPoints.length; i++) {
+                let p1 = pathPoints[i-1], p2 = pathPoints[i];
+                if (p1.x !== p2.x && p1.y !== p2.y) {
+                    ctx.lineTo(Math.round(mapX(p2.x)), Math.round(mapY(p1.y)));
+                }
+                ctx.lineTo(Math.round(mapX(p2.x)), Math.round(mapY(p2.y))); 
+            }
+            ctx.stroke();
+            
+            ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2;
+            ctx.beginPath(); 
+            ctx.moveTo(Math.round(mapX(pathPoints[0].x)), Math.round(mapY(pathPoints[0].y)));
+            for (let i=1; i<pathPoints.length; i++) {
+                let p1 = pathPoints[i-1], p2 = pathPoints[i];
+                if (p1.x !== p2.x && p1.y !== p2.y) {
+                    ctx.lineTo(Math.round(mapX(p2.x)), Math.round(mapY(p1.y)));
+                }
+                ctx.lineTo(Math.round(mapX(p2.x)), Math.round(mapY(p2.y))); 
+            }
+            ctx.stroke();
+        }
+
+        let carCx = mapX(robotPos.x), carCy = mapY(robotPos.y);
+        let envelopeR = Math.hypot(carL, carW) / 2;
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.4)'; ctx.setLineDash([5, 5]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(carCx, carCy, PX(envelopeR), 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+
+        ctx.save(); ctx.translate(carCx, carCy); ctx.rotate(robotAngle);
+        ctx.fillStyle = '#3b82f6'; ctx.fillRect(-PX(carL/2), -PX(carW/2), PX(carL), PX(carW));
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.strokeRect(-PX(carL/2), -PX(carW/2), PX(carL), PX(carW));
+        
+        let grabCenterX = PX(carL/2 - 60);
+        if (currentAction && currentAction.type === 'action' && currentAction.actionType === 'grab') grabCenterX += Math.sin(actionProgress * Math.PI) * 40;
+        ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(grabCenterX, 0, PX(60), 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+        
+        if (currentAction && currentAction.type === 'action' && currentAction.actionType === 'scan' && Math.floor(actionProgress * 10) % 2 === 0) {
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.5)'; ctx.beginPath(); ctx.moveTo(PX(carL/2), 0); ctx.arc(0, 0, PX(150), -Math.PI/6, Math.PI/6); ctx.fill();
+        }
+        ctx.restore();
+
+        ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 3; ctx.strokeRect(PADDING, PADDING, DRAW_AREA, DRAW_AREA);
+    }
+
+    const GRID = 10, COLS = Math.ceil(MAP_SIZE / GRID), ROWS = Math.ceil(MAP_SIZE / GRID);
+
+    function findPath(start, end, startAngle) {
+        let grid = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+        let staticObs = getStaticObs(), rawMatYCenter = -(150 - rawMatGap);
+        let { halfX, halfY } = getCarAABB(startAngle);
+
+        for(let y=0; y<ROWS; y++) {
+            for(let x=0; x<COLS; x++) {
+                let cx = x * GRID + GRID/2, cy = y * GRID + GRID/2;
+                if (cx - halfX < 0 || cx + halfX > MAP_SIZE || cy - halfY < 0 || cy + halfY > MAP_SIZE) { grid[y][x] = 1; continue; }
+                for(let o of staticObs) { 
+                    if (isRectRectColliding(cx, cy, o.x, o.y, o.w, o.h, startAngle)) { grid[y][x] = 1; break; } 
+                }
+                if (grid[y][x] === 1) continue;
+                if (isRectCircleColliding(cx, cy, 1200, rawMatYCenter, 150, startAngle)) { grid[y][x] = 1; continue; }
+                for(let o of dynamicObs) { 
+                    if (isRectCircleColliding(cx, cy, o.x, o.y, safeRadMM, startAngle)) { grid[y][x] = 1; break; } 
+                }
+            }
+        }
+
+        let sNode = { x: Math.floor(start.x/GRID), y: Math.floor(start.y/GRID), dir: null };
+        let eNode = { x: Math.floor(end.x/GRID), y: Math.floor(end.y/GRID) };
+        const findNearestSafe = (node) => {
+            if(grid[node.y] && grid[node.y][node.x] === 0) return node;
+            for(let r=1; r<=20; r++) for(let dy=-r; dy<=r; dy++) for(let dx=-r; dx<=r; dx++) {
+                let ny = node.y+dy, nx = node.x+dx;
+                if(ny>=0 && ny<ROWS && nx>=0 && nx<COLS && grid[ny][nx]===0) return { x: nx, y: ny, dir: null };
+            }
+            return null;
+        };
+        sNode = findNearestSafe(sNode); eNode = findNearestSafe(eNode);
+        if(!sNode || !eNode) return null;
+
+        let open = [{ ...sNode, g:0, h:0, f:0, p:null }], closed = [];
+        while(open.length > 0) {
+            let currIdx = 0; for(let i=1; i<open.length; i++) if(open[i].f < open[currIdx].f) currIdx = i;
+            let curr = open[currIdx];
+            if(curr.x === eNode.x && curr.y === eNode.y) {
+                let res = []; while(curr.p) { res.push({ x: curr.x*GRID+GRID/2, y: curr.y*GRID+GRID/2 }); curr = curr.p; }
+                res.reverse(); return smoothPath(res, grid, startAngle); 
+            }
+            open.splice(currIdx, 1); closed.push(curr);
+            
+            // 纯 4 方向，杜绝斜线
+            const dirs = [[0,1],[1,0],[0,-1],[-1,0]];
+            for(let d of dirs) {
+                let nx = curr.x+d[0], ny = curr.y+d[1];
+                if(nx<0 || nx>=COLS || ny<0 || ny>=ROWS || grid[ny][nx]===1 || closed.find(n => n.x===nx && n.y===ny)) continue;
+                
+                // 【关键修复】把转弯惩罚降到极低（0.01），让寻路以最短距离为核心
+                let turnPenalty = (curr.dir && (curr.dir.x !== d[0] || curr.dir.y !== d[1])) ? 0.01 : 0;
+                let g = curr.g + 1 + turnPenalty; 
+                
+                let h = Math.abs(nx - eNode.x) + Math.abs(ny - eNode.y);
+                let ext = open.find(n => n.x===nx && n.y===ny);
+                if(!ext) open.push({ x:nx, y:ny, g, h, f:g+h, p:curr, dir: {x: d[0], y: d[1]} });
+                else if(g < ext.g) { ext.g=g; ext.f=g+ext.h; ext.p=curr; ext.dir = {x: d[0], y: d[1]}; }
+            }
+        }
+        return null;
+    }
+
+    // 【关键修复】重写平滑逻辑，强势合并冗余点
+    function smoothPath(path, grid, startAngle) {
+        if (path.length <= 2) return path;
+        let newPath = [path[0]];
+        let curr = 0;
+        let { halfX, halfY } = getCarAABB(startAngle);
+        
+        while (curr < path.length - 1) {
+            let furthest = curr + 1;
+            // 从最远的点往回找，试图跨越连接
+            for (let i = path.length - 1; i > curr + 1; i--) {
+                let p1 = path[curr], p2 = path[i];
+                
+                // 方案 1：同一水平/垂直线（无遮挡直接拉直）
+                if (p1.x === p2.x || p1.y === p2.y) {
+                    if (checkLineOfSight(p1, p2, grid, halfX, halfY)) { 
+                        furthest = i; break;
+                    }
+                } 
+                // 方案 2：如果不在同一直线，试图构建一个 L 型大拐弯
+                else {
+                    let corner1 = { x: p2.x, y: p1.y };
+                    let corner2 = { x: p1.x, y: p2.y };
+                    
+                    if (checkLineOfSight(p1, corner1, grid, halfX, halfY) && checkLineOfSight(corner1, p2, grid, halfX, halfY)) {
+                        if(!(newPath[newPath.length-1].x === corner1.x && newPath[newPath.length-1].y === corner1.y)) {
+                            newPath.push(corner1);
+                        }
+                        furthest = i; break;
+                    } 
+                    else if (checkLineOfSight(p1, corner2, grid, halfX, halfY) && checkLineOfSight(corner2, p2, grid, halfX, halfY)) {
+                        if(!(newPath[newPath.length-1].x === corner2.x && newPath[newPath.length-1].y === corner2.y)) {
+                            newPath.push(corner2);
+                        }
+                        furthest = i; break;
+                    }
+                }
+            }
+            newPath.push(path[furthest]); 
+            curr = furthest;
+        }
+        return newPath;
+    }
+
+    function checkLineOfSight(p1, p2, grid, halfX, halfY) {
+        let dx = p2.x - p1.x, dy = p2.y - p1.y, dist = Math.hypot(dx, dy), steps = Math.ceil(dist / (GRID/2));
+        for (let i = 1; i < steps; i++) {
+            let t = i / steps, x = Math.floor((p1.x + dx * t) / GRID), y = Math.floor((p1.y + dy * t) / GRID);
+            if (x*GRID < halfX || x*GRID > MAP_SIZE - halfX || y*GRID < halfY || y*GRID > MAP_SIZE - halfY) return false;
+            if (grid[y] && grid[y][x] === 1) return false;
+        }
+        return true;
+    }
+
+    function setZone(z) { if(animTimer) return; currentZone = z; document.getElementById('btnZ1').className = z===1 ? 'zone-btn active' : 'zone-btn'; document.getElementById('btnZ2').className = z===2 ? 'zone-btn active' : 'zone-btn'; resetSim(); }
+    function clearObstacles() { if(animTimer) clearInterval(animTimer); dynamicObs = []; resetSim(); log("已清空所有障碍物"); }
+    function resetSim() { if(animTimer) clearInterval(animTimer); pathPoints = []; isMissionPlanned = false; actionQueue = []; currentAction = null; robotPos = getStartPt(); robotAngle = 0; updateUIStatus("待命"); draw(); }
+
+    function calcAngleDiff(current, target) {
+        let diff = (target - current) % (Math.PI * 2);
+        if (diff > Math.PI) diff -= Math.PI * 2; if (diff < -Math.PI) diff += Math.PI * 2; return diff;
+    }
+
+    // 严格正交入队
+    function addActionMoveStrict(x1, y1, x2, y2) {
+        x1 = Math.round(x1); y1 = Math.round(y1);
+        x2 = Math.round(x2); y2 = Math.round(y2);
+        
+        if (x1 !== x2 && y1 !== y2) {
+            actionQueue.push({ type: 'move', x: x2, y: y1, isStrictX: true });
+            actionQueue.push({ type: 'move', x: x2, y: y2, isStrictY: true });
+        } else {
+            actionQueue.push({ type: 'move', x: x2, y: y2, isStrictX: (y1===y2), isStrictY: (x1===x2) });
+        }
+    }
+
+    function runMission() {
+        if(animTimer) clearInterval(animTimer); pathPoints = []; robotPos = getStartPt(); robotAngle = 0; actionQueue = []; currentAction = null;
+        let missionSequence = [];
+        for(let i=0; i<12; i++) { let val = document.getElementById(`step${i}`).value; if(val !== 'none') missionSequence.push(val); }
+        if (missionSequence.length === 0) { log("❌ 未配置任务！"); return; }
+        log(`开始全局规划: ${missionSequence.join(" -> ")}`);
+        
+        let currPt = robotPos, currentAngle = robotAngle, coords = getTaskCoords();
+        
+        for(let i=0; i<missionSequence.length; i++) {
+            let targetId = missionSequence[i], target = coords[targetId];
+            
+            let seg = findPath(currPt, target, currentAngle);
+            if(!seg) { log(`❌ 无法到达 ${targetId}，被阻挡！`); isMissionPlanned = false; draw(); return; }
+            
+            seg[0] = { x: Math.round(currPt.x), y: Math.round(currPt.y) };
+            
+            if(actionQueue.length > 0 && seg.length > 0) seg.shift();
+            
+            let lastPt = currPt;
+            for(let j=0; j<seg.length; j++) {
+                addActionMoveStrict(lastPt.x, lastPt.y, seg[j].x, seg[j].y);
+                lastPt = seg[j];
+            }
+            
+            actionQueue.push({ type: 'rotate', targetAngle: target.angle });
+            currentAngle = target.angle;
+            
+            actionQueue.push({ type: 'action', actionType: target.actionType, duration: Math.round(grabTime * 1000 / 20), text: target.actionType === 'scan' ? `正在扫码...` : `正在抓取...` });
+            pathPoints = pathPoints.concat(seg); currPt = target;
+        }
+        let retSeg = findPath(currPt, getStartPt(), currentAngle);
+        if(retSeg) {
+            retSeg[0] = { x: Math.round(currPt.x), y: Math.round(currPt.y) };
+            if(actionQueue.length > 0 && retSeg.length > 0) retSeg.shift();
+            
+            let lastPt = currPt;
+            for(let j=0; j<retSeg.length; j++) {
+                addActionMoveStrict(lastPt.x, lastPt.y, retSeg[j].x, retSeg[j].y);
+                lastPt = retSeg[j];
+            }
+            
+            pathPoints = pathPoints.concat(retSeg); actionQueue.push({ type: 'rotate', targetAngle: 0 });
+        }
+        isMissionPlanned = true; log("✅ 全局规划成功，开始运行");
+        
+        animTimer = setInterval(() => {
+            if (actionQueue.length === 0 && !currentAction) { clearInterval(animTimer); animTimer = null; updateUIStatus("任务完成"); log("🏁 任务完成"); return; }
+            if (!currentAction && actionQueue.length > 0) {
+                currentAction = actionQueue.shift(); actionProgress = 0;
+                if (currentAction.type === 'rotate') { currentAction.remaining = calcAngleDiff(robotAngle, currentAction.targetAngle); updateUIStatus("原地旋转"); }
+                else if (currentAction.type === 'action') updateUIStatus(currentAction.text);
+                else if (currentAction.type === 'move') updateUIStatus("移动中");
+            }
+            if (currentAction.type === 'move') {
+                let dx = currentAction.x - robotPos.x, dy = currentAction.y - robotPos.y;
+                
+                if (currentAction.isStrictX) dy = 0;
+                if (currentAction.isStrictY) dx = 0;
+                
+                let dist = Math.abs(dx) + Math.abs(dy);
+                let { halfX, halfY } = getCarAABB(robotAngle); 
+                
+                if(dist <= moveSpeed || dist < 0.5) { 
+                    robotPos.x = currentAction.x; robotPos.y = currentAction.y; currentAction = null; 
+                } else { 
+                    if (dx !== 0) robotPos.x += Math.sign(dx) * Math.min(moveSpeed, Math.abs(dx));
+                    if (dy !== 0) robotPos.y += Math.sign(dy) * Math.min(moveSpeed, Math.abs(dy));
+                    
+                    robotPos.x = Math.max(halfX, Math.min(MAP_SIZE - halfX, robotPos.x)); 
+                    robotPos.y = Math.max(halfY, Math.min(MAP_SIZE - halfY, robotPos.y)); 
+                }
+            } else if (currentAction.type === 'rotate') {
+                if (Math.abs(currentAction.remaining) <= rotSpeed) { robotAngle = currentAction.targetAngle; currentAction = null; }
+                else { let step = Math.sign(currentAction.remaining) * rotSpeed; robotAngle += step; currentAction.remaining -= step; }
+            } else if (currentAction.type === 'action') {
+                actionProgress += 1 / currentAction.duration; if (actionProgress >= 1) currentAction = null;
+            }
+            uiPos.innerText = `${robotPos.x.toFixed(0)}, ${robotPos.y.toFixed(0)}`; uiAngle.innerText = `${(robotAngle * 180 / Math.PI).toFixed(0)}°`;
+            draw();
+        }, 20);
+    }
+
+    function updateUIStatus(text) { uiState.innerText = text; }
+
+    function updateParam(type, val) {
+        val = parseFloat(val);
+        if (type === 'obs') obsRadMM = val;
+        if (type === 'safe') safeRadMM = val;
+        if (type === 'rawGap') rawMatGap = val;
+        if (type === 'tempY') tempZoneCenterY = val;
+        if (type === 'carL') carL = val;
+        if (type === 'carW') carW = val;
+        if (type === 'moveSpeed') moveSpeed = val;
+        if (type === 'rotSpeed') rotSpeed = val;
+        if (type === 'grabTime') grabTime = val;
+
+        if (['moveSpeed', 'rotSpeed', 'grabTime'].includes(type)) return;
+
+        if(animTimer) { clearInterval(animTimer); animTimer = null; }
+        if (isMissionPlanned) { runMission(); } else { draw(); }
+    }
+
+    const sliders = [
+        { sId: 'rawGapSlider', nId: 'rawGapNum', type: 'rawGap' },
+        { sId: 'tempYSlider', nId: 'tempYNum', type: 'tempY' },
+        { sId: 'obsRadSlider', nId: 'obsRadNum', type: 'obs' },
+        { sId: 'safeRadSlider', nId: 'safeRadNum', type: 'safe' },
+        { sId: 'moveSpeedSlider', nId: 'moveSpeedNum', type: 'moveSpeed' },
+        { sId: 'rotSpeedSlider', nId: 'rotSpeedNum', type: 'rotSpeed' },
+        { sId: 'grabTimeSlider', nId: 'grabTimeNum', type: 'grabTime' }
+    ];
+    
+    sliders.forEach(item => {
+        const s = document.getElementById(item.sId), n = document.getElementById(item.nId);
+        if(s && n) {
+            s.addEventListener('input', (e) => { n.value = e.target.value; updateParam(item.type, e.target.value); });
+            n.addEventListener('input', (e) => { s.value = e.target.value; updateParam(item.type, e.target.value); });
+        }
+    });
+
+    document.getElementById('carLNum').addEventListener('input', (e) => updateParam('carL', e.target.value));
+    document.getElementById('carWNum').addEventListener('input', (e) => updateParam('carW', e.target.value));
+
+    canvas.addEventListener('mousedown', (e) => {
+        const rect = canvas.getBoundingClientRect(), scale = 600 / rect.width;
+        const cx = (e.clientX - rect.left) * scale, cy = (e.clientY - rect.top) * scale;
+        let x = (cx - PADDING) / MM2PX, y = (cy - PADDING) / MM2PX;
+        if (x < 0 || x > MAP_SIZE || y < 0 || y > MAP_SIZE) return;
+        let hit = dynamicObs.findIndex(o => Math.hypot(o.x-x, o.y-y) < Math.max(20, safeRadMM));
+        if(e.button === 0) { if(hit === -1) { dynamicObs.push({x, y}); log(`添加障碍点`); if(animTimer) { clearInterval(animTimer); animTimer = null; } if (isMissionPlanned) runMission(); else draw(); } }
+        else if(e.button === 2) { if(hit !== -1) { dynamicObs.splice(hit, 1); log(`删除障碍点`); if(animTimer) { clearInterval(animTimer); animTimer = null; } if (isMissionPlanned) runMission(); else draw(); } }
+    });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('resize', () => { draw(); });
+    initMissionUI(); resetSim();
+</script>
+</body>
+</html>

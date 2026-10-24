@@ -1,0 +1,15 @@
+# 编辑器
+.vscode/
+.idea/
+*.swp
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 临时备份
+*.bak
+*.tmp
+*.log
+*~
